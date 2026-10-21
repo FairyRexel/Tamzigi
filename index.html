@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#1d2018">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>금속 탐지기 | JCH’s work</title>
+<style>
+  :root {
+    --ground: #1d2018; --shell: #2c3024; --shell-hi: #3d4231; --edge: #4b5140;
+    --lcd: #bfc9a6; --ink: #1b2315; --faint: rgba(27,35,21,.17);
+    --bone: #e3dcc6; --muted: #9a9d84; --amber: #e3a21f; --hot: #e0452a; --ok: #8fc15a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overscroll-behavior: none; touch-action: manipulation; }
+  body {
+    background: radial-gradient(120% 70% at 50% 0%, #2a2e22 0%, var(--ground) 65%);
+    color: var(--bone);
+    font-family: system-ui, -apple-system, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+    display: flex; justify-content: center;
+  }
+  .device {
+    width: 100%; max-width: 420px; height: 100dvh;
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 16px calc(env(safe-area-inset-bottom, 0px) + 12px);
+    display: flex; flex-direction: column; gap: 14px;
+  }
+
+  /* 상단 바 */
+  .bar { display: flex; align-items: center; justify-content: space-between; }
+  .plate {
+    font-weight: 900; font-size: 1rem; letter-spacing: .03em; color: #22261b;
+    background: linear-gradient(#d9d2bb, #bdb69f); padding: 6px 12px; border-radius: 4px;
+    box-shadow: 0 1px 0 #f1ecd9 inset, 0 2px 0 #0006;
+  }
+  .link { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #565a47; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.demo { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  .dot.err { background: var(--hot); box-shadow: 0 0 8px var(--hot); }
+
+  /* LCD */
+  .lcd {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+    background: linear-gradient(180deg, #c6d0ad, #b8c29f);
+    color: var(--ink); border-radius: 14px; padding: 12px 14px 12px;
+    box-shadow: inset 0 3px 10px #0006, 0 0 0 5px var(--shell), 0 0 0 7px var(--edge);
+    font-family: ui-monospace, "SF Mono", "Roboto Mono", "Courier New", monospace;
+    transition: background .08s, color .08s;
+  }
+  .lcd.alert { background: var(--ink); color: var(--lcd); --faint: rgba(191,201,166,.2); }
+  .lcd-top { display: flex; justify-content: space-between; font-size: .85rem; font-weight: 700; }
+  #peak { font-weight: 500; font-variant-numeric: tabular-nums; }
+  .dial { flex: 1; min-height: 0; display: flex; align-items: center; }
+  .dial svg { width: 100%; max-height: 100%; display: block; }
+  .dial text { font-family: inherit; fill: currentColor; }
+  #status { display: inline-block; }
+  #sub { text-align: center; font-size: .8rem; font-variant-numeric: tabular-nums; padding-bottom: 8px; min-height: 1.3em; }
+  canvas { display: block; width: 100%; height: 64px; border-top: 1px solid var(--faint); }
+
+  /* 오류 안내 */
+  .err { background: #3a2b1c; border: 1px solid #7a5a2a; border-radius: 12px; padding: 12px 14px; font-size: .85rem; line-height: 1.5; color: #f0d9b0; }
+  .err[hidden] { display: none; }
+  .err button { margin-top: 10px; padding: 10px 14px; font-size: .85rem; border-radius: 8px; background: var(--amber); color: #2a1f08; box-shadow: none; width: 100%; }
+
+  /* 버튼 */
+  .controls { display: grid; grid-template-columns: 1fr 76px 76px; gap: 10px; }
+  button {
+    font: inherit; font-weight: 700; font-size: 1rem; border: 0; border-radius: 12px; height: 56px; cursor: pointer;
+    color: var(--bone); background: var(--shell-hi); box-shadow: 0 4px 0 #181a12; transition: transform .06s, box-shadow .06s;
+  }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #181a12; }
+  button:focus-visible { outline: 2px solid var(--bone); outline-offset: 3px; }
+  #go { background: var(--amber); color: #2a1f08; box-shadow: 0 4px 0 #8a6210; }
+  #go.on { background: var(--bone); color: #26241b; box-shadow: 0 4px 0 #8c8774; }
+  #go:active { box-shadow: 0 1px 0 #0006; }
+  #snd[aria-pressed="false"] { color: var(--muted); text-decoration: line-through; }
+  .foot { text-align: center; font-size: .72rem; color: #7d8068; }
+
+  /* 시작 화면: CSS만으로 한 번 나타났다 사라짐 */
+  #boot {
+    position: fixed; inset: 0; z-index: 9; background: var(--ground); display: grid; place-content: center; text-align: center; gap: 10px;
+    pointer-events: none; animation: bootOut .5s ease 1.3s forwards;
+  }
+  .boot-mark { font-size: 2.1rem; font-weight: 900; letter-spacing: .02em; animation: bootIn .7s ease both; }
+  .boot-sub { font-size: .9rem; color: var(--muted); animation: bootIn .7s ease .25s both; }
+  @keyframes bootIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes bootOut { to { opacity: 0; visibility: hidden; } }
+  @media (prefers-reduced-motion: reduce) { #boot { animation: bootOut .01s 0s forwards; } .boot-mark, .boot-sub { animation: none; } #fill { transition: none; } }
+</style>
+</head>
+<body>
+<div id="boot"><div class="boot-mark">JCH’s work</div><div class="boot-sub">금속 탐지기</div></div>
+
+<main class="device">
+  <header class="bar">
+    <div class="plate">JCH’s work</div>
+    <div class="link"><span class="dot" id="dot"></span><span id="linkTxt">센서 대기</span></div>
+  </header>
+
+  <section class="lcd" id="lcd">
+    <div class="lcd-top"><span id="status">대기</span><span id="peak">최대 +0.0</span></div>
+    <div class="dial">
+      <svg viewBox="0 0 240 200" aria-label="자기장 변화량 게이지">
+        <g id="ticks"></g>
+        <circle id="track" cx="120" cy="120" r="96" fill="none" stroke="currentColor" stroke-opacity=".17" stroke-width="14" transform="rotate(135 120 120)"/>
+        <circle id="fill" cx="120" cy="120" r="96" fill="none" stroke="currentColor" stroke-width="14" transform="rotate(135 120 120)"/>
+        <line id="peakMark" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity="0"/>
+        <circle id="ping" cx="120" cy="120" r="62" fill="none" stroke="currentColor" stroke-width="2" opacity="0" style="transform-box:fill-box;transform-origin:center"/>
+        <text id="val" x="120" y="132" text-anchor="middle" font-size="50" font-weight="700" letter-spacing="-2">--.-</text>
+        <text x="120" y="154" text-anchor="middle" font-size="12">µT 변화</text>
+      </svg>
+    </div>
+    <div id="sub">시작을 누르면 기준값을 잡습니다</div>
+    <canvas id="scope"></canvas>
+  </section>
+
+  <div class="err" id="err" hidden>
+    <p id="errMsg"></p>
+    <button id="demoBtn">데모 모드로 화면 확인</button>
+  </div>
+
+  <div class="controls">
+    <button id="go">탐지 시작</button>
+    <button id="zero">영점</button>
+    <button id="snd" aria-pressed="true">소리</button>
+  </div>
+  <div class="foot">© 2026 JCH’s work</div>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+
+  /* ───────── 설정 ───────── */
+  const CFG = {
+    WARN: 15,        // 이 값(µT) 이상 변하면 "접근"
+    HOT: 50,         // 이 값 이상이면 "강한 자성체"
+    MAX: 150,        // 게이지 만점
+    HIST: 150,       // 그래프에 남기는 샘플 수
+    CALIB: 20,       // 기준값 계산에 쓰는 샘플 수
+    HZ: 30,          // 센서 샘플링 속도
+    DRIFT: 0.0015    // 평온할 때 기준값이 천천히 따라가는 비율
+  };
+
+  /* ───────── 상태 ───────── */
+  const S = {
+    running: false, mode: 'real', sensor: null, demoTimer: 0, wake: null,
+    base: null, calib: [], smooth: null, total: 0, delta: 0, peak: 0, level: 0,
+    hist: new Array(CFG.HIST).fill(0), lastBeep: 0, muted: false, dirty: true,
+    disp: 0, vel: 0, test: 0, prevLevel: 0, lastLabel: '', lastPeak: -1
+  };
+  try { S.muted = localStorage.getItem('jch-muted') === '1'; } catch (_) {}
+
+  const el = {
+    lcd: $('lcd'), val: $('val'), sub: $('sub'), status: $('status'), peak: $('peak'),
+    fill: $('fill'), mark: $('peakMark'), ticks: $('ticks'), dot: $('dot'), link: $('linkTxt'),
+    go: $('go'), zero: $('zero'), snd: $('snd'), err: $('err'), errMsg: $('errMsg'), demo: $('demoBtn'),
+    cvs: $('scope'), ping: $('ping')
+  };
+  const ctx = el.cvs.getContext('2d');
+
+  /* ───────── 효과 ───────── */
+  const RM = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function fx(node, frames, ms) { if (!RM && node.animate) node.animate(frames, { duration: ms, easing: 'ease-out' }); }
+  function ping(strong) {                      // 비프음 박자에 맞춰 퍼지는 링
+    if (RM || !el.ping.animate) return;
+    el.ping.setAttribute('stroke-width', strong ? 4 : 2);
+    el.ping.animate(
+      [{ transform: 'scale(.55)', opacity: strong ? .9 : .6 }, { transform: 'scale(1.5)', opacity: 0 }],
+      { duration: strong ? 620 : 800, easing: 'cubic-bezier(.2,.7,.3,1)' });
+  }
+
+  /* ───────── 게이지 ───────── */
+  const CX = 120, CY = 120, R = 96, C = 2 * Math.PI * R, ARC = C * 0.75;
+  const pol = (f, r) => { const a = (135 + f * 270) * Math.PI / 180; return [CX + r * Math.cos(a), CY + r * Math.sin(a)]; };
+  (function buildGauge() {
+    $('track').style.strokeDasharray = `${ARC} ${C}`;
+    el.fill.style.strokeDasharray = `0 ${C}`;
+    let svg = '';
+    for (let i = 0; i <= 30; i++) {
+      const major = i % 10 === 0, f = i / 30;
+      const [x1, y1] = pol(f, R + 11), [x2, y2] = pol(f, R + (major ? 22 : 17));
+      svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="currentColor" stroke-width="${major ? 2 : 1}" opacity="${major ? 1 : .55}"/>`;
+      if (major) { const [tx, ty] = pol(f, R - 20); svg += `<text x="${tx}" y="${ty + 4}" text-anchor="middle" font-size="11" opacity=".8">${i * 5}</text>`; }
+    }
+    el.ticks.innerHTML = svg;
+  })();
+
+  /* ───────── 오디오 · 진동 ───────── */
+  let audio = null;
+  function initAudio() {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+    } catch (_) {}
+  }
+  function beep(freq, ms) {
+    if (!audio || S.muted) return;
+    const t = audio.currentTime, o = audio.createOscillator(), g = audio.createGain();
+    o.type = 'triangle'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
+    o.connect(g); g.connect(audio.destination);
+    o.start(t); o.stop(t + ms / 1000 + 0.02);
+  }
+
+  /* ───────── 측정 ───────── */
+  function onSample(mag) {
+    S.smooth = S.smooth == null ? mag : S.smooth * 0.6 + mag * 0.4;
+    S.total = S.smooth;
+
+    if (S.base == null) {                     // 기준값 측정 단계
+      S.calib.push(S.smooth);
+      if (S.calib.length >= CFG.CALIB) {
+        S.base = S.calib.reduce((a, b) => a + b, 0) / S.calib.length;
+        S.calib = [];
+        ping(true); if (navigator.vibrate) navigator.vibrate(30);      // 기준값 잠금
+      }
+      S.level = -1; S.dirty = true; return;
+    }
+
+    let d = Math.abs(S.smooth - S.base);
+    if (d < CFG.WARN * 0.5) S.base += (S.smooth - S.base) * CFG.DRIFT;   // 주변 환경 변화 추적
+    d = Math.abs(S.smooth - S.base);
+
+    S.delta = d;
+    if (d > S.peak) S.peak = d;
+    S.hist.push(d); S.hist.shift();
+    S.level = d >= CFG.HOT ? 2 : d >= CFG.WARN ? 1 : 0;
+    if (S.level === 2 && S.prevLevel < 2)       // 강한 자성체에 진입하는 순간 화면이 떨림
+      fx(el.lcd, [{ transform: 'none' }, { transform: 'translateX(-5px)' }, { transform: 'translateX(4px)' }, { transform: 'translateX(-2px)' }, { transform: 'none' }], 240);
+    S.prevLevel = S.level;
+    S.dirty = true;
+
+    if (S.level > 0) {                         // 가까울수록 빠르고 높은 소리
+      const now = performance.now(), gap = Math.max(80, 520 - d * 3.5);
+      if (now - S.lastBeep > gap) {
+        ping(S.level === 2);
+        beep(520 + Math.min(d, CFG.MAX) * 6, 45);
+        if (navigator.vibrate) navigator.vibrate(S.level === 2 ? 40 : 18);
+        S.lastBeep = now;
+      }
+    }
+  }
+
+  function resetMeasure() {
+    S.base = null; S.calib = []; S.smooth = null; S.delta = 0; S.peak = 0; S.level = -1; S.prevLevel = 0;
+    S.hist.fill(0); S.dirty = true;
+  }
+
+  /* ───────── 센서 ───────── */
+  function openSensor() {
+    return new Promise((resolve, reject) => {
+      if (!window.isSecureContext) return reject({ name: 'Insecure' });
+      if (!('Magnetometer' in window)) return reject({ name: 'Unsupported' });
+      let live = false, dog;
+      const done = err => { clearTimeout(dog); err ? reject(err) : resolve(); };
+      try {
+        const s = new Magnetometer({ frequency: CFG.HZ });
+        S.sensor = s;
+        s.addEventListener('reading', () => {
+          if (s.x == null) return;
+          if (!live) { live = true; done(); }
+          if (S.running) onSample(Math.hypot(s.x, s.y, s.z));
+        });
+        s.addEventListener('error', ev => {
+          const err = ev.error || { name: 'Unknown' };
+          live ? fail(err) : done(err);
+        });
+        dog = setTimeout(() => done({ name: 'Silent' }), 2500);   // 2.5초간 값이 없으면 실패 처리
+        s.start();
+      } catch (e) { done(e); }
+    });
+  }
+
+  function startDemo() {                       // 센서 없이 화면만 확인하는 데모
+    const t0 = performance.now();
+    S.demoTimer = setInterval(() => {
+      const t = (performance.now() - t0) / 1000;
+      const wave = Math.pow(0.5 + 0.5 * Math.sin(t / 1.6), 3) * 110;
+      onSample(46 + wave + (Math.random() - 0.5) * 1.5);
+    }, 33);
+  }
+
+  function stopSources() {
+    if (S.sensor) { try { S.sensor.stop(); } catch (_) {} S.sensor = null; }
+    clearInterval(S.demoTimer); S.demoTimer = 0;
+    if (S.wake) { S.wake.release().catch(() => {}); S.wake = null; }
+  }
+
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) S.wake = await navigator.wakeLock.request('screen'); } catch (_) {}
+  }
+
+  const MESSAGES = {
+    Insecure: '보안 연결(HTTPS)에서만 센서를 쓸 수 있습니다. 호스팅한 주소로 접속했는지 확인하세요.',
+    Unsupported: '이 환경은 자기 센서 API를 지원하지 않습니다. 안드로이드 크롬이나 크롬 기반으로 설치한 앱에서 실행하세요.',
+    NotAllowedError: '센서 권한이 막혀 있습니다. 크롬 설정 > 사이트 설정 > 모션 센서를 허용으로 바꿔주세요.',
+    SecurityError: '센서 권한이 막혀 있습니다. 크롬 설정 > 사이트 설정 > 모션 센서를 허용으로 바꿔주세요.',
+    NotReadableError: '센서를 읽을 수 없습니다. 기기에 자기 센서가 없거나 다른 앱이 사용 중일 수 있습니다.',
+    Silent: '센서에서 값이 들어오지 않습니다. 기기에 자기 센서가 없거나 절전 모드로 막혀 있을 수 있습니다.'
+  };
+
+  function fail(err) {
+    console.warn('[magnetometer]', err);
+    stopSources(); S.running = false;
+    el.errMsg.textContent = MESSAGES[err && err.name] || '센서를 시작하지 못했습니다. (' + ((err && err.name) || '알 수 없음') + ')';
+    el.err.hidden = false;
+    setLink('err', '센서 오류');
+    syncUI(); resetMeasure();
+  }
+
+  /* ───────── 제어 ───────── */
+  async function start() {
+    initAudio(); resetMeasure(); el.err.hidden = true;
+    S.running = true; syncUI();
+    fx(el.lcd, [{ opacity: .15 }, { opacity: 1 }, { opacity: .35 }, { opacity: 1 }], 360);   // 전원 켜질 때 깜빡임
+    if (S.mode === 'demo') { setLink('demo', '데모 모드'); startDemo(); keepAwake(); return; }
+    setLink('', '센서 연결 중');
+    try { await openSensor(); setLink('ok', '센서 연결됨'); keepAwake(); }
+    catch (e) { fail(e); }
+  }
+
+  function stop() {
+    stopSources(); S.running = false; resetMeasure();
+    setLink(S.mode === 'demo' ? 'demo' : '', S.mode === 'demo' ? '데모 모드' : '센서 대기');
+    syncUI();
+  }
+
+  function setLink(cls, txt) { el.dot.className = 'dot ' + cls; el.link.textContent = txt; }
+  function syncUI() {
+    el.go.textContent = S.running ? '정지' : '탐지 시작';
+    el.go.classList.toggle('on', S.running);
+    S.dirty = true;
+  }
+
+  el.go.addEventListener('click', () => (S.running ? stop() : start()));
+  el.zero.addEventListener('click', () => { if (S.running) { const m = S.mode; resetMeasure(); S.mode = m; } });
+  el.demo.addEventListener('click', () => { S.mode = 'demo'; start(); });
+  el.snd.addEventListener('click', () => {
+    S.muted = !S.muted; el.snd.setAttribute('aria-pressed', String(!S.muted));
+    try { localStorage.setItem('jch-muted', S.muted ? '1' : '0'); } catch (_) {}
+    if (!S.muted) { initAudio(); beep(660, 60); }
+  });
+  el.snd.setAttribute('aria-pressed', String(!S.muted));
+  document.addEventListener('visibilitychange', () => { if (document.hidden && S.running) stop(); });
+
+  /* ───────── 렌더링 ───────── */
+  function sizeCanvas() {
+    const r = window.devicePixelRatio || 1;
+    el.cvs.width = el.cvs.clientWidth * r; el.cvs.height = el.cvs.clientHeight * r;
+    ctx.setTransform(r, 0, 0, r, 0, 0); S.dirty = true;
+  }
+
+  function drawScope(now) {
+    const w = el.cvs.clientWidth, h = el.cvs.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    const ink = getComputedStyle(el.lcd).color;
+    ctx.strokeStyle = ink; ctx.fillStyle = ink;
+    const y = v => h - Math.min(v, CFG.MAX) / CFG.MAX * (h - 10) - 5;
+    ctx.globalAlpha = .4; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, y(CFG.HOT)); ctx.lineTo(w, y(CFG.HOT)); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    S.hist.forEach((v, i) => { const x = i / (CFG.HIST - 1) * (w - 6); i ? ctx.lineTo(x, y(v)) : ctx.moveTo(x, y(v)); });
+    ctx.stroke();
+
+    const ex = w - 6, ey = y(S.hist[CFG.HIST - 1]);          // 현재값 점과 맥박
+    if (S.running && !RM) {
+      const p = (now % 900) / 900;
+      ctx.globalAlpha = .35 * (1 - p); ctx.beginPath(); ctx.arc(ex, ey, 3 + p * 9, 0, 6.283); ctx.fill();
+    }
+    ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(ex, ey, 3.2, 0, 6.283); ctx.fill();
+
+    ctx.globalCompositeOperation = 'destination-out';         // 오래된 값은 왼쪽으로 흐려짐
+    const g = ctx.createLinearGradient(0, 0, w * .35, 0);
+    g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w * .35, h);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  const LABEL = ['주변 탐색 중', '금속 접근', '강한 자성체 감지'];
+  const setText = (node, t) => { if (node.textContent !== t) node.textContent = t; };
+  let lastT = performance.now();
+
+  function targetValue(now) {                 // 바늘이 향해야 할 값
+    if (S.test) {                             // 전원 자가 점검: 끝까지 올라갔다 내려옴
+      const t = (now - S.test) / 1500;
+      if (t < 1) return CFG.MAX * Math.sin(Math.PI * t) * 0.98;
+      S.test = 0;
+    }
+    if (!S.running) return 0;
+    if (S.base == null) return CFG.MAX * (0.5 + 0.42 * Math.sin(now / 260));   // 기준값 측정 중 스캔
+    return S.delta;
+  }
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+    const tgt = targetValue(now);
+    if (RM) { S.disp = tgt; S.vel = 0; }
+    else {                                    // 스프링 물리: 살짝 튕기는 아날로그 바늘
+      S.vel += ((tgt - S.disp) * 190 - S.vel * 16) * dt;
+      S.disp += S.vel * dt;
+    }
+    S.disp = Math.max(0, Math.min(S.disp, CFG.MAX * 1.04));
+    const moving = Math.abs(S.disp - tgt) > 0.05 || Math.abs(S.vel) > 0.05;
+    if (!S.dirty && !moving && !S.running && !S.test) return;
+    S.dirty = false;
+
+    const calibrating = S.running && S.base == null, idle = !S.running;
+    el.fill.style.strokeDasharray = `${ARC * (S.disp / CFG.MAX)} ${C}`;
+    setText(el.val, S.test ? '+' + S.disp.toFixed(1)
+      : idle || calibrating ? '--.-' : (S.smooth >= S.base ? '+' : '-') + S.delta.toFixed(1));
+    setText(el.peak, '최대 +' + S.peak.toFixed(1));
+    setText(el.sub, idle ? '시작을 누르면 기준값을 잡습니다'
+      : calibrating ? '금속에서 떨어뜨린 채 잠시 유지하세요'
+      : '총 ' + S.total.toFixed(1) + ' µT   기준 ' + S.base.toFixed(1) + ' µT');
+
+    const label = S.test ? '자가 점검' : idle ? '대기' : calibrating ? '기준값 측정 중' : LABEL[S.level];
+    if (label !== S.lastLabel) {
+      S.lastLabel = label; el.status.textContent = label;
+      fx(el.status, [{ opacity: 0, transform: 'translateY(-5px)' }, { opacity: 1, transform: 'none' }], 200);
+    }
+    el.lcd.classList.toggle('alert', S.level === 2 && S.running);
+
+    if (S.peak !== S.lastPeak) {
+      S.lastPeak = S.peak;
+      if (S.peak > 0) {
+        const pf = Math.min(S.peak, CFG.MAX) / CFG.MAX, [x1, y1] = pol(pf, R - 12), [x2, y2] = pol(pf, R + 9);
+        el.mark.setAttribute('x1', x1); el.mark.setAttribute('y1', y1);
+        el.mark.setAttribute('x2', x2); el.mark.setAttribute('y2', y2); el.mark.setAttribute('opacity', '1');
+      } else el.mark.setAttribute('opacity', '0');
+    }
+    drawScope(now);
+  }
+
+  window.addEventListener('resize', sizeCanvas);
+  sizeCanvas(); syncUI(); requestAnimationFrame(frame);
+  if (!RM) setTimeout(() => { if (!S.running) { S.test = performance.now(); S.dirty = true; } }, 1500);   // 시작 화면이 끝나면 자가 점검
+
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('sw.js').catch(console.warn);
+  }
+})();
+</script>
+</body>
+</html>
